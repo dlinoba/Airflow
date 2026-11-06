@@ -24,8 +24,8 @@ class CLIENTE(Base):
     NASCIMENTO = Column(DateTime)
 
 
-class DIM_CLIENTE(Base):
-    __tablename__ = 'DIM_CLIENTE'
+class DWCD_CLIENTE(Base):
+    __tablename__ = 'DWCD_CLIENTE'
 
     IDSK = Column(Integer, primary_key=True, autoincrement=True)
     IDCLIENTE = Column(Integer, nullable=False)
@@ -53,17 +53,3 @@ class ST_CLIENTE(Base):
     ESTADO = Column(String(20))
     REGIAO = Column(String(20))
     OPERACAO = Column(String(10))
-
-class DIM_TEMPO(Base):
-    __tablename__ = 'DIM_TEMPO'
-
-    IDSK = Column(Integer, primary_key=True)
-    DATA = Column(DateTime)
-
-
-class FATO(Base):
-    __tablename__ = 'FATO'
-
-    IDSK = Column(Integer, primary_key=True)
-    IDCLIENTE = Column(Integer)
-    IDTEMPO = Column(Integer)
