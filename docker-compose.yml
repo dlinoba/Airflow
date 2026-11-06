@@ -1,0 +1,141 @@
+x-airflow-build: &airflow-build
+  context: .
+  dockerfile: Dockerfile.airflow
+
+services:
+  # Banco de metadados interno do Airflow (não armazena dados do projeto).
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-airflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no arquivo .env}
+      POSTGRES_DB: ${POSTGRES_DB:-airflow}
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-airflow} -d ${POSTGRES_DB:-airflow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # MySQL 8.4 para OLTP, Stage e DW.
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Defina MYSQL_ROOT_PASSWORD no arquivo .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ERP_OLTP}
+      MYSQL_USER: ${MYSQL_USER:?Defina MYSQL_USER no arquivo .env}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Defina MYSQL_PASSWORD no arquivo .env}
+    volumes:
+      - ./db-volume:/var/lib/mysql
+      - ./setup.sql:/docker-entrypoint-initdb.d/01-setup.sql:ro
+      - ./mysql-init/02-grants.sh:/docker-entrypoint-initdb.d/02-grants.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", 'mysqladmin ping -h 127.0.0.1 -uroot -p"${MYSQL_ROOT_PASSWORD}" --silent']
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  airflow-init:
+    build: *airflow-build
+    image: airflow-etl:3.3.2
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &airflow-common-env
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB:-airflow}
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+      AIRFLOW__LOGGING__BASE_LOG_FOLDER: /opt/airflow/logs
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "${AIRFLOW_USERNAME:-admin}:admin"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/simple_auth_manager_passwords.json
+      # Chaves compartilhadas entre scheduler e api-server. Sem isso cada container gera a sua
+      # e as tasks falham com "Invalid auth token" / "Signature verification failed".
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-chave-de-teste-airflow-jwt-0123456789-abcdefghijklmnopqrstuvwxyz}
+      AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY:-chave-de-teste-airflow-api-0123456789-abcdefghijklmnopqrstuvwxyz}
+      # Variables usadas pelas DAGs (config/database.py)
+      AIRFLOW_VAR_DATABASE_SERVER_OLTP: mysql
+      AIRFLOW_VAR_DATABASE_LOGIN_OLTP: ${MYSQL_USER}
+      AIRFLOW_VAR_DATABASE_PASSWORD_OLTP: ${MYSQL_PASSWORD}
+      AIRFLOW_VAR_DATABASE_NAME_OLTP: ${MYSQL_DATABASE:-ERP_OLTP}
+      AIRFLOW_VAR_DATABASE_SERVER_STAGE: mysql
+      AIRFLOW_VAR_DATABASE_LOGIN_STAGE: ${MYSQL_USER}
+      AIRFLOW_VAR_DATABASE_PASSWORD_STAGE: ${MYSQL_PASSWORD}
+      AIRFLOW_VAR_DATABASE_NAME_STAGE: ERP_STAGE
+      AIRFLOW_VAR_DATABASE_SERVER_DW: mysql
+      AIRFLOW_VAR_DATABASE_LOGIN_DW: ${MYSQL_USER}
+      AIRFLOW_VAR_DATABASE_PASSWORD_DW: ${MYSQL_PASSWORD}
+      AIRFLOW_VAR_DATABASE_NAME_DW: ERP_DW
+    user: "${AIRFLOW_UID:-50000}:0"
+    volumes: &airflow-common-volumes
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+    command: ["bash", "-c", "airflow db migrate"]
+
+  airflow-apiserver:
+    build: *airflow-build
+    image: airflow-etl:3.3.2
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *airflow-common-env
+      AIRFLOW_USERNAME: ${AIRFLOW_USERNAME:-admin}
+      AIRFLOW_PASSWORD: ${AIRFLOW_PASSWORD:?Defina AIRFLOW_PASSWORD no arquivo .env}
+    user: "${AIRFLOW_UID:-50000}:0"
+    volumes: *airflow-common-volumes
+    ports:
+      - "8080:8080"
+    # O SimpleAuthManager (Airflow 3) gera senha aleatória por padrão.
+    # Aqui gravamos o arquivo de senhas com o valor do .env antes de iniciar.
+    command:
+      - bash
+      - -c
+      - >-
+        python -c "import json,os; json.dump({os.environ['AIRFLOW_USERNAME']: os.environ['AIRFLOW_PASSWORD']}, open(os.environ['AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE'], 'w'))"
+        && exec airflow api-server
+
+  airflow-scheduler:
+    build: *airflow-build
+    image: airflow-etl:3.3.2
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment: *airflow-common-env
+    user: "${AIRFLOW_UID:-50000}:0"
+    volumes: *airflow-common-volumes
+    command: scheduler
+
+  airflow-dag-processor:
+    build: *airflow-build
+    image: airflow-etl:3.3.2
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment: *airflow-common-env
+    user: "${AIRFLOW_UID:-50000}:0"
+    volumes: *airflow-common-volumes
+    command: dag-processor
+
+  airflow-triggerer:
+    build: *airflow-build
+    image: airflow-etl:3.3.2
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment: *airflow-common-env
+    user: "${AIRFLOW_UID:-50000}:0"
+    volumes: *airflow-common-volumes
+    command: triggerer

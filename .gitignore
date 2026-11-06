@@ -1,0 +1,4 @@
+.env
+db-volume/
+postgres_data/
+comandos.txt
