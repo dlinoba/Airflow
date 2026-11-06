@@ -7,7 +7,7 @@ from sqlalchemy import update, or_, func
 
 from config.database import get_engine
 
-from models.database_models import (CLIENTE,LOG_CLIENTE,DIM_CLIENTE,DIM_TEMPO,FATO)
+from models.database_models import (CLIENTE,LOG_CLIENTE,DWCD_CLIENTE)
 
 def trunc_stage_table():
   engine_stage = get_engine('stage')
