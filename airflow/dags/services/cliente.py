@@ -7,7 +7,114 @@ from sqlalchemy import update, or_, func
 
 from config.database import get_engine
 
-from models.database_models import (CLIENTE,LOG_CLIENTE,DWCD_CLIENTE)
+from models.database_models import (CLIENTE,LOG_CLIENTE,DWCD_CLIENTE,ETL_EXECUCAO,ETL_CONTROLE)
+
+NOME_PROCESSO = 'ETL_CLIENTE'
+
+def start_execution(**context):
+    engine_dw = get_engine('dw')
+    Session_dw = sessionmaker(bind=engine_dw)
+    session_dw = Session_dw()
+
+    try:
+        dt_inicio = dt.now()
+
+        execucao = ETL_EXECUCAO(
+            NOME_PROCESSO=NOME_PROCESSO,
+            DT_INICIO=dt_inicio,
+            STATUS='RUNNING'
+        )
+
+        session_dw.add(execucao)
+        session_dw.commit()
+
+        # O ID será utilizado pelas próximas tasks via XCom.
+        return execucao.ID_EXECUCAO
+
+    except Exception:
+        session_dw.rollback()
+        raise
+
+    finally:
+        session_dw.close()
+        engine_dw.dispose()
+
+def finish_execution(**context):
+    id_execucao = context['ti'].xcom_pull(
+        task_ids='start_execution'
+    )
+
+    engine_dw = get_engine('dw')
+    Session_dw = sessionmaker(bind=engine_dw)
+    session_dw = Session_dw()
+
+    try:
+        execucao = session_dw.query(ETL_EXECUCAO).filter(
+            ETL_EXECUCAO.ID_EXECUCAO == id_execucao
+        ).one()
+
+        execucao.DT_FIM = dt.now()
+        execucao.STATUS = 'SUCCESS'
+
+        controle = session_dw.query(ETL_CONTROLE).filter(
+            ETL_CONTROLE.NOME_PROCESSO == NOME_PROCESSO
+        ).first()
+
+        if controle is None:
+            controle = ETL_CONTROLE(
+                NOME_PROCESSO=NOME_PROCESSO
+            )
+            session_dw.add(controle)
+
+        # A referência será exatamente o DT_INICIO
+        # da execução que acabou de concluir com sucesso.
+        controle.DT_ULTIMA_CARGA = execucao.DT_INICIO
+
+        session_dw.commit()
+
+    except Exception:
+        session_dw.rollback()
+        raise
+
+    finally:
+        session_dw.close()
+        engine_dw.dispose()
+
+def fail_execution(context):
+    ti = context['ti']
+
+    id_execucao = ti.xcom_pull(
+        task_ids='start_execution'
+    )
+
+    if id_execucao is None:
+        return
+
+    engine_dw = get_engine('dw')
+    Session_dw = sessionmaker(bind=engine_dw)
+    session_dw = Session_dw()
+
+    try:
+        execucao = session_dw.query(ETL_EXECUCAO).filter(
+            ETL_EXECUCAO.ID_EXECUCAO == id_execucao
+        ).first()
+
+        if execucao and execucao.STATUS == 'RUNNING':
+            execucao.DT_FIM = dt.now()
+            execucao.STATUS = 'FAILED'
+            execucao.MENSAGEM_ERRO = str(
+                context.get('exception', 'Erro na execução da ETL')
+            )[:60000]
+
+            session_dw.commit()
+
+    except Exception:
+        session_dw.rollback()
+        raise
+
+    finally:
+        session_dw.close()
+        engine_dw.dispose()
 
 def trunc_stage_table():
   engine_stage = get_engine('stage')
@@ -29,16 +136,15 @@ def extract_oltp_clients():
   session_oltp = Session_oltp()
 
   try:
-    max_date = session_dw.query(func.max(DIM_TEMPO.DATA)).join(FATO, FATO.IDTEMPO == DIM_TEMPO.IDSK).first()
-
-    if max_date[0] is None:
-      max_date = dt(2023,1,1)
+    controle = session_dw.query(ETL_CONTROLE).filter(ETL_CONTROLE.NOME_PROCESSO == NOME_PROCESSO).first()
+    if controle is None or controle.DT_ULTIMA_CARGA is None:
+      dt_ultima_carga = dt(1900, 1, 1)
     else:
-      max_date = max_date[0]
+      dt_ultima_carga = controle.DT_ULTIMA_CARGA
 
     df = pd.read_sql_query(
         sql = session_oltp.query(CLIENTE,LOG_CLIENTE.OPERACAO).select_from(LOG_CLIENTE).join(CLIENTE, LOG_CLIENTE.IDCLIENTE==CLIENTE.IDCLIENTE).filter(
-                        LOG_CLIENTE.DATA_OPERACAO >= max_date).statement,
+                        LOG_CLIENTE.DATA_OPERACAO >= dt_ultima_carga).statement,
             con = engine_oltp)
     
     df_uf = pd.read_excel('/opt/airflow/dags/CLIENTES_ESTADOS.xlsx')
