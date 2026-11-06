@@ -189,7 +189,7 @@ def transform():
     engine_stage.dispose()
 
 def load(**context):
-  #carrega os dados da área de staging na DIM_CLIENTE (SCD tipo 2).
+  #carrega os dados da área de staging na DWCD_CLIENTE (SCD tipo 2).
 
   # Recupera os dados enviados pela task transform_data
   dados = context['ti'].xcom_pull(task_ids='transform_data')
@@ -213,7 +213,7 @@ def load(**context):
   try:
     # to_dict devolve tipos nativos do Python (int, str), que o pymysql aceita
     for row in df.to_dict(orient='records'):
-      novo_cliente = DIM_CLIENTE(IDCLIENTE = row['IDCLIENTE'],
+      novo_cliente = DWCD_CLIENTE(IDCLIENTE = row['IDCLIENTE'],
                                  INICIO = DT_INICIO,
                                  FIM = None,
                                  NOME = row['NOME'],
@@ -226,24 +226,24 @@ def load(**context):
 
       if row['OPERACAO'] == 'Inclusão':
         # só insere se o cliente ainda não tem registro vigente na dimensão
-        vigente = session_dw.query(DIM_CLIENTE.IDSK).filter(
-                    DIM_CLIENTE.IDCLIENTE == row['IDCLIENTE'],
-                    DIM_CLIENTE.FIM.is_(None)).order_by(DIM_CLIENTE.IDSK.desc()).first()
+        vigente = session_dw.query(DWCD_CLIENTE.IDSK).filter(
+                    DWCD_CLIENTE.IDCLIENTE == row['IDCLIENTE'],
+                    DWCD_CLIENTE.FIM.is_(None)).order_by(DWCD_CLIENTE.IDSK.desc()).first()
 
         if vigente is None:
           session_dw.add(novo_cliente)
 
       elif row['OPERACAO'] == 'Alteração':
         # só versiona se NOME ou CIDADE mudaram em relação ao registro vigente
-        alterado = session_dw.query(DIM_CLIENTE.IDSK).filter(
-                    DIM_CLIENTE.IDCLIENTE == row['IDCLIENTE'],
-                    DIM_CLIENTE.FIM.is_(None),
-                    or_(DIM_CLIENTE.NOME != row['NOME'], DIM_CLIENTE.CIDADE != row['CIDADE'])
-                    ).order_by(DIM_CLIENTE.IDSK.desc()).first()
+        alterado = session_dw.query(DWCD_CLIENTE.IDSK).filter(
+                    DWCD_CLIENTE.IDCLIENTE == row['IDCLIENTE'],
+                    DWCD_CLIENTE.FIM.is_(None),
+                    or_(DWCD_CLIENTE.NOME != row['NOME'], DWCD_CLIENTE.CIDADE != row['CIDADE'])
+                    ).order_by(DWCD_CLIENTE.IDSK.desc()).first()
 
         if alterado is not None:
-          session_dw.execute(update(DIM_CLIENTE).
-                             where(DIM_CLIENTE.IDSK == alterado[0]).
+          session_dw.execute(update(DWCD_CLIENTE).
+                             where(DWCD_CLIENTE.IDSK == alterado[0]).
                              values(FIM=DT_INICIO))
           session_dw.add(novo_cliente)
 
