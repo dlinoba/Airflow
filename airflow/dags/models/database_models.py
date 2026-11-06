@@ -3,6 +3,24 @@ from sqlalchemy import (Column,Integer,DateTime,String,CHAR)
 
 Base = declarative_base()
 
+class ETL_EXECUCAO(Base):
+    __tablename__ = 'ETL_EXECUCAO'
+
+    ID_EXECUCAO = Column(Integer, primary_key=True, autoincrement=True)
+    NOME_PROCESSO = Column(String(100), nullable=False)
+    DT_INICIO = Column(DateTime, nullable=False)
+    DT_FIM = Column(DateTime)
+    STATUS = Column(String(20), nullable=False)
+    MENSAGEM_ERRO = Column(Text)
+
+
+class ETL_CONTROLE(Base):
+    __tablename__ = 'ETL_CONTROLE'
+
+    ID_CONTROLE = Column(Integer, primary_key=True, autoincrement=True)
+    NOME_PROCESSO = Column(String(100), nullable=False, unique=True)
+    DT_ULTIMA_CARGA = Column(DateTime)
+
 
 class LOG_CLIENTE(Base):
     __tablename__ = 'LOG_CLIENTE'
