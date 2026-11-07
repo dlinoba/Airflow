@@ -1,6 +1,6 @@
 x-airflow-build: &airflow-build
   context: .
-  dockerfile: Dockerfile.airflow
+  dockerfile: Dockerfile
 
 services:
   # Banco de metadados interno do Airflow (não armazena dados do projeto).

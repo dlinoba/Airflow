@@ -1,24 +1,12 @@
-# Airflow_Example (EM CONSTRUÇÃO)
-This is an ETL example using SCD type 2 simmulating a client update
+# Airflow_Example 
+This is an ETL example using SCD type 2 simmulating a client update.
 
---To create MYSQL Container use the Dockerfile and docker-compose
+To create container use this comand docker compose up -d --build in the same folder that has docker-compose.yml
 
---To create AIRFLOW Container
-docker run -d -p 8080:8080 -v "$PWD/airflow/dags:/opt/airflow/dags/" --entrypoint=/bin/bash --name airflow apache/airflow:2.1.1-python3.8 -c '(airflow db init && airflow users create --username admin --password 1234 --firstname Simple --lastname Example --role Admin --email admin@example.com.br); airflow webserver & airflow scheduler'
+After everything is running, you can check mysql database and check DWCD_CLIENTE table and then 
+run these SQL commands bellow and run de DAG again
 
-And next connect to the Airflow container using the command
-docker container exec -it airflow bash
-and then install pymysql
-pip install pymysql
+INSERT INTO CLIENTE (NOME,SOBRENOME,EMAIL,SEXO,NASCIMENTO) VALUES ('Teste','Teste','teste@teste.com.br','M','2000-03-10')
 
+UPDATE CLIENTE SET NOME = 'Kaio' WHERE IDCLIENTE = 10
 
-After everything is running, you can check mysql database and check DIM_CLIENTE table
-Next insert a fake sales in FATO table by sql command bellow
-
-INSERT INTO FATO VALUES (1,1,1,1,1,1,350,10,10,10,11)
-
-And then insert a new client or change a client by sql command bellow
-INSERT INTO CLIENTE (IDCLIENTE,NOME,SOBRENOME,EMAIL,SEXO,NASCIMENTO)
-VALUES (11,'FAKE','NAME','FakeName@supermail.com','M','1989-05-22');
-
-UPDATE CLIENTE SET NOME = 'TEST' WHERE IDCLIENTE = 1

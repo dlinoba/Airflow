@@ -21,7 +21,7 @@ def get_engine(database):
     password = Variable.get(f'database_password_{ambiente}')
     database_name = Variable.get(f'database_name_{ambiente}')
 
-    url = URL(
+    url = URL.create(
         drivername='mysql+pymysql',
         username=login,
         password=password,
