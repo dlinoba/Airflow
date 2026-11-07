@@ -138,10 +138,13 @@ A row with `FIM IS NULL` represents the current version.
 ├── airflow/
 │   └── dags/
 │       ├── config/
+|       |   |__ __init__.py
 │       │   └── database.py
 │       ├── models/
+|       |   |__ __init__.py
 │       │   └── database_models.py
 │       ├── services/
+|       |   |__ __init__.py
 │       │   └── cliente.py
 │       ├── CLIENTES_ESTADOS.xlsx
 │       └── etl_client.py
