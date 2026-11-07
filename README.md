@@ -1,35 +1,27 @@
 # Apache Airflow — Incremental ETL Pipeline
 
-An end-to-end Data Engineering project focused on ETL orchestration, incremental data processing, data quality and historical data management using Apache Airflow, Python, Pandas, MySQL and Docker.
+An end-to-end Data Engineering portfolio project that demonstrates how to orchestrate an incremental ETL pipeline using **Apache Airflow 3**, **Python**, **Pandas**, **MySQL**, **PostgreSQL** and **Docker Compose**.
 
-The project simulates a customer data integration scenario in which changes from an operational database are captured, processed through an ETL pipeline and loaded into a Data Warehouse.
+The pipeline captures customer changes from a MySQL operational database, stages and transforms the data, and loads a Data Warehouse while preserving historical versions using **Slowly Changing Dimension Type 2 (SCD Type 2)**.
 
-The solution implements incremental extraction, execution monitoring and Slowly Changing Dimension Type 2 (SCD Type 2) to preserve historical customer information.
+## Project Overview
 
-Project Overview
+This project simulates a customer data integration scenario and demonstrates:
 
-The main objectives of this project are:
+- ETL orchestration with Apache Airflow.
+- Change tracking in a MySQL OLTP database using triggers.
+- Incremental extraction based on a persisted watermark.
+- Data transformation with Python and Pandas.
+- Separation of OLTP, staging and Data Warehouse layers.
+- Historical data management with SCD Type 2.
+- ETL execution logging and incremental load control.
+- Containerized services managed with Docker Compose.
 
-Orchestrate ETL workflows using Apache Airflow.
+## Architecture
 
-Extract customer data from a MySQL OLTP database.
+The solution separates source data, orchestration, analytical storage and Airflow metadata.
 
-Implement incremental data extraction based on change tracking.
-
-Transform and standardize data using Python and Pandas.
-
-Separate operational, staging and analytical data layers.
-
-Maintain historical customer records using SCD Type 2.
-
-Monitor ETL executions and manage incremental load checkpoints.
-
-Containerize the environment using Docker Compose.
-
-Architecture
-
-The solution uses a layered data architecture, separating operational data, staging and analytical storage.
-
+```mermaid
 flowchart TD
     subgraph SOURCE["Source Layer - MySQL"]
         OLTP["ERP_OLTP"]
@@ -39,23 +31,19 @@ flowchart TD
         CLIENT --> LOG
     end
 
-    subgraph AIRFLOW["Orchestration - Apache Airflow"]
+    subgraph ORCHESTRATION["Orchestration - Apache Airflow"]
         DAG["etl_client DAG"]
         EXTRACT["Extract"]
         TRANSFORM["Transform - Python / Pandas"]
         LOAD["Load - SCD Type 2"]
-
-        DAG --> EXTRACT
-        EXTRACT --> TRANSFORM
-        TRANSFORM --> LOAD
+        DAG --> EXTRACT --> TRANSFORM --> LOAD
     end
 
-    subgraph TARGET["Data Warehouse - MySQL"]
+    subgraph TARGET["Target Layer - MySQL"]
         STAGE["ERP_STAGE"]
         DW["ERP_DW"]
         DIM["DWCD_CLIENTE"]
         CONTROL["ETL_EXECUCAO / ETL_CONTROLE"]
-
         STAGE --> DW
         DW --> DIM
     end
@@ -67,193 +55,85 @@ flowchart TD
     LOAD --> DIM
     DAG -.-> META
     DAG -.-> CONTROL
+```
 
-Database Architecture
+### Database Layers
 
-Database
+| Database | Purpose |
+|---|---|
+| `ERP_OLTP` | Operational source database containing customer records and change logs. |
+| `ERP_STAGE` | Staging area used to prepare extracted customer data. |
+| `ERP_DW` | Data Warehouse containing the customer dimension and ETL control tables. |
+| PostgreSQL | Stores Airflow metadata, separate from the project's MySQL databases. |
 
-Purpose
+## ETL Workflow
 
-ERP_OLTP
+The `etl_client` DAG orchestrates the customer pipeline through the following stages:
 
-Operational database containing customer records and change logs.
+1. **Start Execution** — registers the beginning of an ETL run.
+2. **Prepare Staging** — clears the staging table before loading the current batch.
+3. **Extract** — reads customer changes recorded in `LOG_CLIENTE`.
+4. **Transform** — standardizes and enriches extracted data using Python and Pandas.
+5. **Load** — applies changes to `DWCD_CLIENTE`, preserving history with SCD Type 2.
+6. **Finish Execution** — records the final status and updates the incremental checkpoint after a successful run.
 
-ERP_STAGE
+## Incremental Data Loading
 
-Staging database used during ETL processing.
+The pipeline uses two control tables in `ERP_DW`.
 
-ERP_DW
+### ETL_EXECUCAO
 
-Data Warehouse containing analytical structures and ETL control tables.
+Stores the execution history, including:
 
-PostgreSQL
+- Process name.
+- Start and end timestamps.
+- Execution status.
+- Error message, when applicable.
 
-Stores Apache Airflow metadata and workflow execution information.
+### ETL_CONTROLE
 
-ETL Workflow
+Stores the last successful load timestamp for each ETL process.
 
-The etl_client DAG is responsible for orchestrating the customer data pipeline.
+The `DT_ULTIMA_CARGA` field acts as the watermark used to identify new or modified records in `LOG_CLIENTE`.
 
-The process is divided into the following stages:
+The watermark is advanced only after a successful execution. This prevents a failed run from moving the extraction checkpoint forward and skipping changes on the next attempt.
 
-Step
+## Historical Data — SCD Type 2
 
-Process
+The `DWCD_CLIENTE` dimension keeps previous versions of customer records instead of simply overwriting them.
 
-Description
-
-1
-
-Start Execution
-
-Registers the beginning of an ETL execution.
-
-2
-
-Prepare Staging
-
-Clears the staging table before processing a new batch.
-
-3
-
-Extract
-
-Retrieves customer changes from the OLTP change log.
-
-4
-
-Transform
-
-Standardizes and prepares the extracted data using Python and Pandas.
-
-5
-
-Load
-
-Loads the processed data into the Data Warehouse using SCD Type 2.
-
-6
-
-Finish Execution
-
-Records the final execution status and updates the incremental control timestamp after successful processing.
-
-Incremental Data Loading
-
-The pipeline implements an incremental extraction strategy to avoid processing the entire source database during every execution.
-
-Two control tables are used:
-
-ETL_EXECUCAO
-
-Stores information about each ETL execution:
-
-Execution ID.
-
-Process name.
-
-Start timestamp.
-
-End timestamp.
-
-Execution status.
-
-Error information.
-
-ETL_CONTROLE
-
-Stores the last successful processing timestamp for each ETL process.
-
-The field DT_ULTIMA_CARGA acts as a watermark for incremental extraction.
-
-The extraction process uses this timestamp to identify new or modified records in LOG_CLIENTE.
-
-The control timestamp is updated only after a successful execution, preventing failed executions from advancing the incremental processing reference.
-
-Historical Data Management — SCD Type 2
-
-The Data Warehouse uses Slowly Changing Dimension Type 2 to maintain customer history.
-
-Instead of overwriting existing records, the process preserves previous versions whenever a tracked attribute changes.
-
-The dimension uses the following concepts:
-
-Field
-
-Description
-
-IDSK
-
-Surrogate key identifying each dimension version.
-
-IDCLIENTE
-
-Business key from the operational database.
-
-INICIO
-
-Timestamp when the dimension version becomes valid.
-
-FIM
-
-Timestamp when the dimension version expires.
+| Field | Description |
+|---|---|
+| `IDSK` | Surrogate key identifying a dimension version. |
+| `IDCLIENTE` | Business key from the operational database. |
+| `INICIO` | Timestamp when the version becomes valid. |
+| `FIM` | Timestamp when the version expires. |
 
 When a tracked attribute changes:
 
-The current dimension record is closed by updating its FIM timestamp.
+1. The current version is closed by setting its `FIM` timestamp.
+2. A new version is inserted with the updated information.
+3. Previous versions remain available for historical analysis.
 
-A new dimension record is inserted with the updated information.
+A row with `FIM IS NULL` represents the current version.
 
-Previous versions remain available for historical analysis.
+## Technology Stack
 
-A record with FIM IS NULL represents the current version of the customer.
+| Technology | Purpose |
+|---|---|
+| Apache Airflow 3.3.2 | Workflow orchestration |
+| Python 3.12 | ETL development |
+| Pandas | Data transformation |
+| SQLAlchemy | Database connectivity and ORM |
+| PyMySQL | MySQL driver |
+| MySQL 8.4 | OLTP, staging and Data Warehouse |
+| PostgreSQL 16 | Airflow metadata database |
+| Docker | Containerization |
+| Docker Compose | Local environment orchestration |
 
-This approach allows historical analysis of customer information at different points in time.
+## Repository Structure
 
-Technology Stack
-
-Technology
-
-Application
-
-Apache Airflow 3
-
-Workflow orchestration
-
-Python 3.12
-
-ETL development
-
-Pandas
-
-Data transformation and manipulation
-
-SQLAlchemy
-
-Database connectivity and ORM
-
-PyMySQL
-
-MySQL connectivity
-
-MySQL 8.4
-
-OLTP, Staging and Data Warehouse
-
-PostgreSQL 16
-
-Airflow metadata database
-
-Docker
-
-Containerization
-
-Docker Compose
-
-Environment orchestration
-
-Repository Structure
-
+```text
 .
 ├── airflow/
 │   └── dags/
@@ -265,215 +145,211 @@ Repository Structure
 │       │   └── cliente.py
 │       ├── CLIENTES_ESTADOS.xlsx
 │       └── etl_client.py
-│
 ├── mysql-init/
-│
+│   └── 02-grants.sh
 ├── Dockerfile
 ├── docker-compose.yml
 ├── setup.sql
+├── .env-example
 └── README.md
+```
 
-Main Components
+### Main Components
 
-File / Directory
+| File / Directory | Responsibility |
+|---|---|
+| `airflow/dags/etl_client.py` | Defines the Airflow DAG and task dependencies. |
+| `airflow/dags/services/cliente.py` | Implements customer extraction, transformation, loading and execution tracking. |
+| `airflow/dags/config/database.py` | Configures database connections. |
+| `airflow/dags/models/database_models.py` | Defines database models. |
+| `CLIENTES_ESTADOS.xlsx` | Geographic reference data used during data enrichment. |
+| `setup.sql` | Creates MySQL databases, tables, triggers and sample source data. |
+| `mysql-init/` | Contains MySQL initialization support scripts. |
+| `Dockerfile` | Builds the custom Airflow image and installs DAG dependencies. |
+| `docker-compose.yml` | Defines Airflow, PostgreSQL and MySQL services. |
+| `.env-example` | Template containing the environment variables required to configure the project. |
 
-Description
+## Getting Started
 
-etl_client.py
-
-Defines the Airflow DAG and task dependencies.
-
-services/cliente.py
-
-Implements customer extraction, transformation, loading and execution tracking.
-
-config/database.py
-
-Configures database connections.
-
-models/database_models.py
-
-Defines database models.
-
-CLIENTES_ESTADOS.xlsx
-
-Geographic reference data used during enrichment.
-
-setup.sql
-
-Creates database structures and initial data.
-
-mysql-init/
-
-Contains MySQL initialization support files.
-
-Dockerfile
-
-Defines the custom Airflow image.
-
-docker-compose.yml
-
-Defines the containerized environment.
-
-Getting Started
-
-Prerequisites
+### Prerequisites
 
 Before running the project, make sure you have installed:
 
-Git
+- Git
+- Docker Desktop (Windows/macOS) or Docker Engine (Linux)
+- Docker Compose v2
 
-Docker Desktop or Docker Engine
+### 1. Clone the repository
 
-Docker Compose
-
-1. Clone the Repository
-
+```bash
 git clone https://github.com/dlinoba/Airflow.git
 
 cd Airflow
+```
 
-2. Configure Environment Variables
+### 2. Configure Environment Variables
 
-Create a .env file in the project root directory.
+Create your local `.env` file from the provided example.
 
-Configure the environment variables required by docker-compose.yml.
+**Linux / macOS / Git Bash**
 
-Example:
+```bash
+cp .env-example .env
+```
 
-# MySQL
-MYSQL_ROOT_PASSWORD=change_me_root
+**Windows PowerShell**
+
+```powershell
+Copy-Item .env-example .env
+```
+
+Open `.env` and replace the example passwords with your own values.
+
+The `.env-example` template contains:
+
+```dotenv
+MYSQL_ROOT_PASSWORD=password
 MYSQL_DATABASE=ERP_OLTP
-MYSQL_USER=etl_user
-MYSQL_PASSWORD=change_me_mysql
 
-# PostgreSQL
-POSTGRES_USER=airflow
-POSTGRES_PASSWORD=change_me_postgres
-POSTGRES_DB=airflow
+MYSQL_USER=user
+MYSQL_PASSWORD=password
 
-# Airflow
 AIRFLOW_USERNAME=admin
-AIRFLOW_PASSWORD=change_me_airflow
+AIRFLOW_PASSWORD=password
+AIRFLOW_EMAIL=admin@example.com.br
 
-Replace the example credentials with your own values.
+POSTGRES_USER=admin
+POSTGRES_PASSWORD=password
+```
 
-Important: Never commit real passwords, credentials or sensitive environment variables to GitHub.
+The Docker Compose configuration uses `airflow` as the default PostgreSQL database name when `POSTGRES_DB` is not provided.
 
-3. Build and Start the Environment
+**Important:** Never commit your local `.env` file or real credentials to GitHub. The `.env-example` file should contain only placeholder values.
 
-Run the following command:
+### 3. Build and Start the Environment
 
+Run:
+
+```bash
 docker compose up -d --build
+```
 
 Check the running containers:
 
+```bash
 docker compose ps
+```
 
-4. Access Apache Airflow
+### 4. Access Apache Airflow
 
 Open the following URL in your browser:
 
-http://localhost:8080
+[http://localhost:8080](http://localhost:8080)
 
-Log in using the credentials configured in your environment.
+Sign in using the `AIRFLOW_USERNAME` and `AIRFLOW_PASSWORD` values configured in your local `.env` file.
 
-Locate the etl_client DAG and trigger a manual execution to test the pipeline.
+Find the `etl_client` DAG and trigger a manual execution to test the pipeline.
 
-5. Useful Docker Commands
+### 5. Useful Docker Commands
 
-# Check running containers
+```bash
+# Check container status
 docker compose ps
 
-# View service logs
+# Follow logs from all services
 docker compose logs -f
 
-# View Airflow scheduler logs
+# Follow Airflow scheduler logs
 docker compose logs -f airflow-scheduler
 
-# Stop containers without removing persistent volumes
+# Stop services without deleting persistent data
 docker compose down
 
-# Rebuild and start containers
+# Rebuild and start services
 docker compose up -d --build
+```
 
-Database initialization note: MySQL initialization scripts are normally executed only when the database data directory is initialized for the first time. Changes to initialization scripts may not be applied automatically to an existing database volume.
+### Database Initialization
 
-Testing the ETL Pipeline
+The MySQL service maps `setup.sql` and the scripts in `mysql-init/` to the container's initialization directory.
 
-The project includes sample customer data in the OLTP database.
+MySQL executes these initialization scripts when its data directory is initialized for the first time.
 
-You can simulate customer changes by executing SQL statements such as:
+If the MySQL data directory already exists, changes to `setup.sql` or initialization scripts will not automatically be executed again.
 
+Be careful when resetting the database: deleting its persisted data also deletes the databases stored there.
+
+## Testing the ETL Pipeline
+
+The initialization script creates sample customer records in `ERP_OLTP.CLIENTE`.
+
+You can simulate source changes using SQL statements such as:
+
+```sql
 -- Insert a new customer
-INSERT INTO CLIENTE
+INSERT INTO ERP_OLTP.CLIENTE
     (NOME, SOBRENOME, EMAIL, SEXO, NASCIMENTO)
 VALUES
     ('Teste', 'Teste', 'teste@teste.com.br', 'M', '2000-03-10');
 
 -- Update an existing customer
-UPDATE CLIENTE
+UPDATE ERP_OLTP.CLIENTE
 SET NOME = 'Kaio'
 WHERE IDCLIENTE = 10;
+```
+
+The source table triggers record insert, update and delete operations in `LOG_CLIENTE`.
 
 After modifying the source data:
 
-Access the Airflow interface.
+1. Open the Airflow interface.
+2. Locate the `etl_client` DAG.
+3. Trigger a new execution.
+4. Monitor the task execution.
+5. Verify the results in the Data Warehouse.
 
-Locate the etl_client DAG.
+### Example Validation Queries
 
-Trigger a new execution.
-
-Monitor the task execution.
-
-Verify the results in the Data Warehouse.
-
-Example validation query:
-
+```sql
+-- ETL execution history
 SELECT *
 FROM ERP_DW.ETL_EXECUCAO
 ORDER BY ID_EXECUCAO DESC;
 
+-- Incremental load control
 SELECT *
 FROM ERP_DW.ETL_CONTROLE;
 
+-- Customer historical records
 SELECT *
 FROM ERP_DW.DWCD_CLIENTE
 WHERE IDCLIENTE = 10
 ORDER BY INICIO;
+```
 
-For customers with historical changes, previous dimension versions should have their FIM timestamps populated, while the current version should have FIM IS NULL.
+For customers with historical changes, previous dimension versions should have their `FIM` timestamps populated, while the current version should have `FIM IS NULL`.
 
-Project Scope
+## Project Scope
 
 This project was developed as a practical Data Engineering portfolio project to demonstrate:
 
-ETL pipeline development.
+- ETL pipeline development.
+- Workflow orchestration.
+- Incremental data processing.
+- Data transformation and standardization.
+- Database modeling.
+- Data Warehouse implementation.
+- Historical data management with SCD Type 2.
+- ETL execution monitoring.
+- Docker-based development environments.
 
-Workflow orchestration.
+The current implementation focuses on demonstrating these concepts in a local environment. Additional security hardening, automated testing, observability and infrastructure improvements would be necessary before production deployment.
 
-Incremental data processing.
+## Author
 
-Data transformation and standardization.
-
-Database modeling.
-
-Data Warehouse implementation.
-
-Historical data management with SCD Type 2.
-
-ETL execution monitoring.
-
-Docker-based development environments.
-
-The current implementation focuses on demonstrating these concepts in a local environment. Additional security, automated testing, observability and infrastructure improvements would be necessary before production deployment.
-
-Author
-
-Deyvid Linoba
+**Deyvid Linoba**
 
 Data Engineering | Business Intelligence | Data Analytics
 
-GitHub: @dlinoba
-
-LinkedIn: deyvid-linoba
+- GitHub: [@dlinoba](https://github.com/dlinoba)
+- LinkedIn: [deyvid-linoba](https://www.linkedin.com/in/deyvid-linoba/)
